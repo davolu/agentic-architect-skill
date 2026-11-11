@@ -1,0 +1,374 @@
+{
+  "title": "Multi-Source Research Agent",
+  "summary": "Plan-execute coordinator fans out to isolated, read-only source workers, stores each source once by ID, then verifies every claim. Unsupported claims go to a human, never shown as verified.",
+  "autonomy": "Level: bounded agent (Ch1, Ch24). The model plans sub-queries and writes prose; code enforces the plan check, budgets, read-only tools, deterministic merge and claim verification. No write actions on the outside world.",
+  "layers": [
+    {
+      "name": "User",
+      "trust": "Untrusted request",
+      "boundary_below": "typed task brief",
+      "nodes": [
+        {
+          "id": "researcher",
+          "label": "Researcher",
+          "kind": "actor",
+          "note": "question + scope + deadline",
+          "col": 2
+        }
+      ]
+    },
+    {
+      "name": "Edge and brief",
+      "trust": "Validated, budgeted",
+      "nodes": [
+        {
+          "id": "brief",
+          "label": "Task brief compiler",
+          "kind": "interface",
+          "note": "asks clarifying questions",
+          "col": 2
+        },
+        {
+          "id": "budget",
+          "label": "Budget guard",
+          "kind": "guardrail",
+          "note": "steps, tokens, cost, deadline",
+          "col": 3
+        }
+      ]
+    },
+    {
+      "name": "Planning",
+      "trust": "Model proposes plan",
+      "nodes": [
+        {
+          "id": "planner",
+          "label": "Planner",
+          "kind": "agent",
+          "note": "bounded sub-queries per source",
+          "col": 2
+        },
+        {
+          "id": "plan_check",
+          "label": "Plan checker",
+          "kind": "guardrail",
+          "note": "coverage, allowed sources",
+          "col": 3
+        }
+      ]
+    },
+    {
+      "name": "Coordination",
+      "trust": "Code owns the run",
+      "nodes": [
+        {
+          "id": "coord",
+          "label": "Coordinator",
+          "kind": "orchestrator",
+          "note": "fan-out, hop budget, merge",
+          "col": 2
+        }
+      ]
+    },
+    {
+      "name": "Source workers",
+      "trust": "Parallel, isolated context",
+      "nodes": [
+        {
+          "id": "w_web",
+          "label": "Web worker",
+          "kind": "agent",
+          "note": "ReAct, max 6 steps",
+          "col": 0
+        },
+        {
+          "id": "w_docs",
+          "label": "Internal docs worker",
+          "kind": "agent",
+          "note": "ReAct, max 6 steps",
+          "col": 1
+        },
+        {
+          "id": "w_papers",
+          "label": "Papers worker",
+          "kind": "agent",
+          "note": "ReAct, max 6 steps",
+          "col": 3
+        },
+        {
+          "id": "w_data",
+          "label": "Data worker",
+          "kind": "agent",
+          "note": "read-only SQL, row cap",
+          "col": 4
+        }
+      ]
+    },
+    {
+      "name": "Sources via MCP",
+      "trust": "Read-only, results untrusted",
+      "boundary_below": "retrieved content is data, not instructions",
+      "nodes": [
+        {
+          "id": "web",
+          "label": "Web search MCP",
+          "kind": "external",
+          "note": "allowlisted domains",
+          "col": 0
+        },
+        {
+          "id": "docs",
+          "label": "Docs index (RAG)",
+          "kind": "data",
+          "note": "hybrid search, source IDs",
+          "col": 1
+        },
+        {
+          "id": "papers",
+          "label": "Papers API MCP",
+          "kind": "external",
+          "note": "arXiv / Semantic Scholar",
+          "col": 3
+        },
+        {
+          "id": "sql",
+          "label": "Analytics DB MCP",
+          "kind": "tool",
+          "note": "read-only role, timeouts",
+          "col": 4
+        }
+      ]
+    },
+    {
+      "name": "Synthesis and verification",
+      "trust": "Evidence decides",
+      "nodes": [
+        {
+          "id": "evidence",
+          "label": "Evidence store",
+          "kind": "data",
+          "note": "each source stored once, by ID",
+          "col": 2
+        },
+        {
+          "id": "synth",
+          "label": "Synthesizer",
+          "kind": "agent",
+          "note": "every claim cites a source ID",
+          "col": 3
+        },
+        {
+          "id": "verifier",
+          "label": "Claim verifier",
+          "kind": "guardrail",
+          "note": "claim vs evidence, abstain",
+          "col": 4
+        }
+      ]
+    },
+    {
+      "name": "Review and delivery",
+      "trust": "Human owns the conclusion",
+      "nodes": [
+        {
+          "id": "report",
+          "label": "Cited report",
+          "kind": "interface",
+          "note": "verified claims + gaps",
+          "col": 3
+        },
+        {
+          "id": "review",
+          "label": "Human review",
+          "kind": "human",
+          "note": "unsupported or conflicting claims",
+          "col": 4
+        }
+      ]
+    },
+    {
+      "name": "Observability and evals",
+      "trust": "Replayable runs",
+      "nodes": [
+        {
+          "id": "trace",
+          "label": "Trajectory tracing",
+          "kind": "observability",
+          "note": "span per worker and tool",
+          "col": 2
+        },
+        {
+          "id": "evals",
+          "label": "Eval harness",
+          "kind": "observability",
+          "note": "golden questions, replay, judge",
+          "col": 3
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "researcher",
+      "to": "brief",
+      "label": "question",
+      "kind": "data"
+    },
+    {
+      "from": "brief",
+      "to": "budget",
+      "label": "brief + limits",
+      "kind": "control"
+    },
+    {
+      "from": "brief",
+      "to": "planner",
+      "label": "approved brief",
+      "kind": "data"
+    },
+    {
+      "from": "planner",
+      "to": "plan_check",
+      "label": "proposed plan",
+      "kind": "control"
+    },
+    {
+      "from": "plan_check",
+      "to": "coord",
+      "label": "checked plan",
+      "kind": "control"
+    },
+    {
+      "from": "coord",
+      "to": "w_web",
+      "label": "sub-query",
+      "kind": "control"
+    },
+    {
+      "from": "coord",
+      "to": "w_docs",
+      "label": "sub-query",
+      "kind": "control"
+    },
+    {
+      "from": "coord",
+      "to": "w_papers",
+      "label": "sub-query",
+      "kind": "control"
+    },
+    {
+      "from": "coord",
+      "to": "w_data",
+      "label": "sub-query",
+      "kind": "control"
+    },
+    {
+      "from": "w_web",
+      "to": "web",
+      "label": "search",
+      "kind": "untrusted"
+    },
+    {
+      "from": "w_docs",
+      "to": "docs",
+      "label": "retrieve",
+      "kind": "data"
+    },
+    {
+      "from": "w_papers",
+      "to": "papers",
+      "label": "search",
+      "kind": "untrusted"
+    },
+    {
+      "from": "w_data",
+      "to": "sql",
+      "label": "query (read)",
+      "kind": "data"
+    },
+    {
+      "from": "coord",
+      "to": "evidence",
+      "label": "artifacts with source IDs",
+      "kind": "data"
+    },
+    {
+      "from": "evidence",
+      "to": "synth",
+      "label": "labelled evidence",
+      "kind": "data"
+    },
+    {
+      "from": "synth",
+      "to": "verifier",
+      "label": "cited draft",
+      "kind": "data"
+    },
+    {
+      "from": "verifier",
+      "to": "report",
+      "label": "verified claims",
+      "kind": "data"
+    },
+    {
+      "from": "verifier",
+      "to": "review",
+      "label": "unsupported claims",
+      "kind": "approval"
+    },
+    {
+      "from": "report",
+      "to": "evals",
+      "label": "per-case evidence",
+      "kind": "telemetry"
+    }
+  ],
+  "key_decisions": [
+    "Orchestrator-workers, justified by parallel sources and context isolation (Ch31, Ch32)",
+    "Plan-execute with a code plan check, ReAct inside each worker (Ch13)",
+    "Every source stored once with an ID; citations can only point to it (Ch15, Ch35)",
+    "Verification is its own step; failure means review, not a softer answer (Ch15)",
+    "All tools read-only; web and paper text is untrusted data (Ch47)",
+    "No A2A: workers are in-process, so a protocol adds nothing (Ch62)"
+  ],
+  "rationale": [
+    "Single vs multi-agent: four independent sources are a legitimate reason to split (parallelism and context isolation); a supervisor-style coordinator keeps validation and accountability central (Ch31, Ch32).",
+    "Planning: plan-execute makes sequencing and coverage checkable in code before spending budget; workers use ReAct for adaptive search inside a step cap (Ch13, Ch7).",
+    "Shared state: each worker writes only its own artifacts; the coordinator merges by stable source ID, so completion order never changes the result (Ch33).",
+    "Grounding: hybrid retrieval for internal docs; similarity is a ranking signal, not proof, so the verifier checks each claim against stored evidence (Ch17, Ch16).",
+    "Protocols: MCP for the four source integrations; A2A only if a worker becomes a separately owned remote agent (Ch26, Ch34, Ch62).",
+    "Memory: none across runs in v1; the evidence store is per-run state. Add approved procedural memory (good sources per topic) later (Ch18)."
+  ],
+  "trust_boundaries": [
+    "User to brief: vague requests produce clarifying questions, never invented scope (Ch7, Ch10).",
+    "Source results to workers: bounded, truncated and labelled untrusted; embedded instructions are ignored and logged (Ch29, Ch47).",
+    "Workers to coordinator: typed artifact messages; malformed messages rejected, not interpreted (Ch33).",
+    "Draft to report: the claim verifier is the only path to 'verified' (Ch15, Ch44)."
+  ],
+  "failure_handling": [
+    "Per-worker step budget and timeout; a failed worker returns a typed failure and the report lists the gap instead of fabricating (Ch14, Ch35).",
+    "Global budgets with named stop reasons: MODEL_ANSWER, STEP_BUDGET, TOKEN_BUDGET, DEADLINE (Ch14, Ch52).",
+    "Idempotent source capture: re-fetching the same URL or doc ID does not duplicate evidence (Ch15).",
+    "Hop budget in the coordinator turns runaway delegation into a bounded failure (Ch32)."
+  ],
+  "hitl": [
+    "Brief approval when scope is ambiguous or the budget is large (Ch10).",
+    "Human review for unsupported, conflicting or low-similarity claims before they reach the report (Ch15, Ch44)."
+  ],
+  "evals": [
+    "Golden question set with expected source IDs, including unanswerable questions that must abstain (Ch41, Ch42).",
+    "Replay stored tool arguments without model calls to test determinism (Ch15).",
+    "Model judge only for synthesis quality, calibrated against human labels; deterministic checks for citations (Ch44).",
+    "Track cost and latency per run with quality; the slowest worker sets latency (Ch52)."
+  ],
+  "risks": [
+    "Indirect prompt injection from web pages: read-only tools, untrusted labels, no exfiltration route; owner: platform lead (Ch47).",
+    "Citation laundering (claim cites a source that does not support it): claim-level verifier plus sampled human audit (Ch15, Ch44).",
+    "Cost blow-up from fan-out: budget guard and per-worker caps (Ch52)."
+  ],
+  "non_goals": [
+    "Writing to external systems",
+    "Autonomous publishing of reports",
+    "Open-ended browsing outside allowlisted domains"
+  ]
+}
