@@ -1,0 +1,69 @@
+flowchart TB
+    classDef actor fill:#B3E65F,stroke:#6E9A24,color:#2F440B
+    classDef interface fill:#B3E65F,stroke:#6E9A24,color:#2F440B
+    classDef orchestrator fill:#9CE6FF,stroke:#2C97BB,color:#1C4657
+    classDef agent fill:#B8ACFB,stroke:#8A7BE0,color:#231266
+    classDef guardrail fill:#FFB575,stroke:#CC7830,color:#542700
+    classDef human fill:#FD9AE7,stroke:#D756BA,color:#511341
+    classDef tool fill:#FFE86D,stroke:#A28E26,color:#574900
+    classDef data fill:#81E7DE,stroke:#259D92,color:#0E4343
+    classDef external fill:#DDDDD8,stroke:#8A8A7E,color:#434339
+    classDef observability fill:#BDD1B9,stroke:#81917D,color:#2C3C29
+    subgraph L0["User (Untrusted request)"]
+        researcher(["Researcher<br/><small>question + scope + deadline</small>"]):::actor
+    end
+    subgraph L1["Edge and brief (Validated, budgeted)"]
+        brief["Task brief compiler<br/><small>asks clarifying questions</small>"]:::interface
+        budget{{"Budget guard<br/><small>steps, tokens, cost, deadline</small>"}}:::guardrail
+    end
+    subgraph L2["Planning (Model proposes plan)"]
+        planner(["Planner<br/><small>bounded sub-queries per source</small>"]):::agent
+        plan_check{{"Plan checker<br/><small>coverage, allowed sources</small>"}}:::guardrail
+    end
+    subgraph L3["Coordination (Code owns the run)"]
+        coord["Coordinator<br/><small>fan-out, hop budget, merge</small>"]:::orchestrator
+    end
+    subgraph L4["Source workers (Parallel, isolated context)"]
+        w_web(["Web worker<br/><small>ReAct, max 6 steps</small>"]):::agent
+        w_docs(["Internal docs worker<br/><small>ReAct, max 6 steps</small>"]):::agent
+        w_papers(["Papers worker<br/><small>ReAct, max 6 steps</small>"]):::agent
+        w_data(["Data worker<br/><small>read-only SQL, row cap</small>"]):::agent
+    end
+    subgraph L5["Sources via MCP (Read-only, results untrusted)"]
+        web>"Web search MCP<br/><small>allowlisted domains</small>"]:::external
+        docs[("Docs index (RAG)<br/><small>hybrid search, source IDs</small>")]:::data
+        papers>"Papers API MCP<br/><small>arXiv / Semantic Scholar</small>"]:::external
+        sql["Analytics DB MCP<br/><small>read-only role, timeouts</small>"]:::tool
+    end
+    subgraph L6["Synthesis and verification (Evidence decides)"]
+        evidence[("Evidence store<br/><small>each source stored once, by ID</small>")]:::data
+        synth(["Synthesizer<br/><small>every claim cites a source ID</small>"]):::agent
+        verifier{{"Claim verifier<br/><small>claim vs evidence, abstain</small>"}}:::guardrail
+    end
+    subgraph L7["Review and delivery (Human owns the conclusion)"]
+        report["Cited report<br/><small>verified claims + gaps</small>"]:::interface
+        review(["Human review<br/><small>unsupported or conflicting claims</small>"]):::human
+    end
+    subgraph L8["Observability and evals (Replayable runs)"]
+        trace["Trajectory tracing<br/><small>span per worker and tool</small>"]:::observability
+        evals["Eval harness<br/><small>golden questions, replay, judge</small>"]:::observability
+    end
+    researcher -->|question| brief
+    brief ==>|brief + limits| budget
+    brief -->|approved brief| planner
+    planner ==>|proposed plan| plan_check
+    plan_check ==>|checked plan| coord
+    coord ==>|sub-query| w_web
+    coord ==>|sub-query| w_docs
+    coord ==>|sub-query| w_papers
+    coord ==>|sub-query| w_data
+    w_web -.->|search| web
+    w_docs -->|retrieve| docs
+    w_papers -.->|search| papers
+    w_data -->|query (read)| sql
+    coord -->|artifacts with source IDs| evidence
+    evidence -->|labelled evidence| synth
+    synth -->|cited draft| verifier
+    verifier -->|verified claims| report
+    verifier -.->|unsupported claims| review
+    report -.->|per-case evidence| evals

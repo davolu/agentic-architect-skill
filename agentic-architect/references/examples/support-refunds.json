@@ -1,0 +1,103 @@
+{
+  "title": "Customer Support Agent with Human-Approved Refunds",
+  "summary": "Hybrid workflow: code owns routing, policy and money; the model classifies, drafts cited replies and proposes refunds. Every refund is an exact, single-use, human-approved action.",
+  "autonomy": "Level: hybrid workflow (Ch1 autonomy dial, Ch24). The model may choose wording and propose a route; it can never authorize or execute a refund. Read-only and drafting are automatic, refunds are human-approved, anything unclear escalates.",
+  "layers": [
+    {"name": "Users and channels", "trust": "Untrusted input", "boundary_below": "identity + typed schema", "nodes": [
+      {"id": "customer", "label": "Customer", "kind": "actor", "note": "chat or email", "col": 2}
+    ]},
+    {"name": "Edge and input guard", "trust": "Authenticated, validated", "nodes": [
+      {"id": "api", "label": "Support API", "kind": "interface", "note": "auth, typed request, request_id", "col": 2},
+      {"id": "in_guard", "label": "Input guard", "kind": "guardrail", "note": "PII redaction, injection screen", "col": 3}
+    ]},
+    {"name": "Orchestration", "trust": "Code decides, model proposes", "nodes": [
+      {"id": "classifier", "label": "Intent classifier", "kind": "agent", "note": "typed route (enum)", "col": 0},
+      {"id": "triage", "label": "Triage workflow graph", "kind": "orchestrator", "note": "checkpointed, step budget", "col": 2},
+      {"id": "drafter", "label": "Reply drafter", "kind": "agent", "note": "cites policy IDs or abstains", "col": 3},
+      {"id": "retriever", "label": "Policy retriever", "kind": "orchestrator", "note": "hybrid search, metadata filters", "col": 4}
+    ]},
+    {"name": "Policy and human approval", "trust": "Deny by default", "boundary_below": "only approved, exact actions pass", "nodes": [
+      {"id": "gate", "label": "Refund policy gate", "kind": "guardrail", "note": "eligibility, amount limit, owner", "col": 1},
+      {"id": "approval", "label": "Human approval", "kind": "human", "note": "approve exact refund or escalate", "col": 2},
+      {"id": "out_guard", "label": "Output guard", "kind": "guardrail", "note": "citations, PII, tone", "col": 3}
+    ]},
+    {"name": "Tools via MCP", "trust": "Narrow, scoped, allowlisted", "nodes": [
+      {"id": "orders", "label": "Orders MCP", "kind": "tool", "note": "read-only scope", "col": 0},
+      {"id": "refund", "label": "Refund MCP", "kind": "tool", "note": "write, idempotency key", "col": 2},
+      {"id": "helpdesk", "label": "Helpdesk MCP", "kind": "tool", "note": "send reply, update ticket", "col": 3}
+    ]},
+    {"name": "Data, state and knowledge", "trust": "Owner-scoped", "nodes": [
+      {"id": "checkpoints", "label": "Checkpoint store", "kind": "data", "note": "thread_id, durable interrupts", "col": 1},
+      {"id": "ledger", "label": "Refund ledger", "kind": "data", "note": "unique key, receipts", "col": 2},
+      {"id": "kb", "label": "Policy knowledge base", "kind": "data", "note": "chunks with source ID + version", "col": 4}
+    ]},
+    {"name": "Observability and evals", "trust": "Every component emits spans", "nodes": [
+      {"id": "trace", "label": "Trajectory tracing", "kind": "observability", "note": "OpenTelemetry, redacted", "col": 1},
+      {"id": "audit", "label": "Audit log", "kind": "observability", "note": "approvals, denials, expiries", "col": 2},
+      {"id": "evals", "label": "Eval harness and release gate", "kind": "observability", "note": "golden set, red-team ledger", "col": 3}
+    ]}
+  ],
+  "edges": [
+    {"from": "customer", "to": "api", "label": "message", "kind": "data"},
+    {"from": "api", "to": "in_guard", "label": "typed request", "kind": "data"},
+    {"from": "in_guard", "to": "triage", "label": "screened case", "kind": "data"},
+    {"from": "triage", "to": "classifier", "label": "classify", "kind": "control"},
+    {"from": "classifier", "to": "orders", "label": "order lookup (read)", "kind": "control"},
+    {"from": "triage", "to": "drafter", "label": "draft reply", "kind": "control"},
+    {"from": "drafter", "to": "retriever", "label": "policy query", "kind": "control"},
+    {"from": "retriever", "to": "kb", "label": "passages = data", "kind": "untrusted"},
+    {"from": "triage", "to": "gate", "label": "refund proposal", "kind": "control"},
+    {"from": "gate", "to": "checkpoints", "label": "save, then interrupt", "kind": "control"},
+    {"from": "gate", "to": "approval", "label": "within policy", "kind": "approval"},
+    {"from": "approval", "to": "refund", "label": "approved exact action", "kind": "approval"},
+    {"from": "refund", "to": "ledger", "label": "idempotent write", "kind": "data"},
+    {"from": "drafter", "to": "out_guard", "label": "cited draft", "kind": "data"},
+    {"from": "out_guard", "to": "helpdesk", "label": "send reply", "kind": "data"},
+    {"from": "ledger", "to": "audit", "label": "receipts", "kind": "telemetry"},
+    {"from": "checkpoints", "to": "trace", "label": "state transitions", "kind": "telemetry"}
+  ],
+  "key_decisions": [
+    "Hybrid workflow, not a free agent: money moves only through code (Ch24)",
+    "Approve the exact refund, single-use and expiring, never the agent (Ch49)",
+    "Read-only first, drafts next, bounded writes last (Ch56)",
+    "One agent is enough: no multi-agent split (Ch31)",
+    "Retrieved text and emails are data, never instructions (Ch47)",
+    "Release only when the eval gate says PROMOTE (Ch45)"
+  ],
+  "rationale": [
+    "Workflow vs agent: refunds are irreversible, so routing, eligibility and execution live in deterministic code; the model only classifies and drafts (Ch24, Ch1).",
+    "Single agent: no measured shortfall justifies more agents; every boundary adds cost, latency and failure points (Ch31).",
+    "Durable interrupt: the graph checkpoints before the approval pause and resumes without repeating finished steps; the interrupted node has no side effects (Ch23, Ch19).",
+    "Tools: narrow MCP servers with separate read and write scopes, a client-side allowlist that fails closed, and authorization in the host, not the protocol (Ch11, Ch29, Ch28).",
+    "Grounding: hybrid retrieval with metadata filters; replies cite policy IDs or abstain with a handoff (Ch17, Ch20).",
+    "Memory: no long-term memory in v1. Case state lives in checkpoints; add owner-scoped preferences later only through approval (Ch18, Ch19)."
+  ],
+  "trust_boundaries": [
+    "Channel to API: authenticate the customer, validate a typed request, attach request_id (Ch51).",
+    "Retrieved passages and customer text to model: labelled as untrusted data with provenance (Ch9, Ch47).",
+    "Model proposal to refund tool: policy gate (deny by default) plus a keyed, single-use human approval receipt bound to tool, target and amount (Ch48, Ch49).",
+    "Host to MCP servers: caller-side allowlist and scoped tokens; tokens are never passed through to downstream services (Ch28, Ch29)."
+  ],
+  "failure_handling": [
+    "Every tool call has a timeout and returns a structured error envelope; only transient errors are retried, with a cap and backoff (Ch14, Ch53).",
+    "Refund writes carry an idempotency key from business facts (order_id + amount + reason); a lost response is checked against the ledger before any retry (Ch14, Ch53).",
+    "Named stop reasons: MODEL_ANSWER, STEP_BUDGET, TOKEN_BUDGET, ESCALATED, DENIED. Anything but MODEL_ANSWER is incomplete work (Ch14).",
+    "Approval timeout or missing reviewer fails toward no refund and escalation, never execution (Ch49).",
+    "Circuit breaker on the refund provider; compensation is a new, separately approved action (Ch53)."
+  ],
+  "hitl": [
+    "Every refund: reviewer sees order, policy citation, amount and draft, then approves one exact action (Ch49).",
+    "Over-limit, unclear intent, policy conflict or abstention: escalate to a human queue (Ch56)."
+  ],
+  "evals": [
+    "Golden set with stable case IDs: happy paths, ineligible refunds, over-limit, injection in email body, missing order (Ch42).",
+    "Separate dimensions: task success, groundedness (cited policy IDs), tool accuracy, safety (zero unapproved refunds), trajectory efficiency (Ch41).",
+    "Trace every run as one span tree; release gate PROMOTE/HOLD with a zero-tolerance safety floor (Ch43, Ch45, Ch65)."
+  ],
+  "risks": [
+    "Prompt injection in emails steering refunds: mitigated by the policy gate and approval; owner: support platform lead (Ch46).",
+    "Reviewer rubber-stamping: show evidence, sample audits, track approval latency; owner: support ops manager (Ch49, Ch59).",
+    "Policy drift making KB stale: version sources, re-index on change (Ch16)."
+  ],
+  "non_goals": ["Autonomous refunds without approval", "Account changes or cancellations in v1", "Voice channel"]
+}

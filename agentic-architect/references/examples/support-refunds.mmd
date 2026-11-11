@@ -1,0 +1,61 @@
+flowchart TB
+    classDef actor fill:#B3E65F,stroke:#6E9A24,color:#2F440B
+    classDef interface fill:#B3E65F,stroke:#6E9A24,color:#2F440B
+    classDef orchestrator fill:#9CE6FF,stroke:#2C97BB,color:#1C4657
+    classDef agent fill:#B8ACFB,stroke:#8A7BE0,color:#231266
+    classDef guardrail fill:#FFB575,stroke:#CC7830,color:#542700
+    classDef human fill:#FD9AE7,stroke:#D756BA,color:#511341
+    classDef tool fill:#FFE86D,stroke:#A28E26,color:#574900
+    classDef data fill:#81E7DE,stroke:#259D92,color:#0E4343
+    classDef external fill:#DDDDD8,stroke:#8A8A7E,color:#434339
+    classDef observability fill:#BDD1B9,stroke:#81917D,color:#2C3C29
+    subgraph L0["Users and channels (Untrusted input)"]
+        customer(["Customer<br/><small>chat or email</small>"]):::actor
+    end
+    subgraph L1["Edge and input guard (Authenticated, validated)"]
+        api["Support API<br/><small>auth, typed request, request_id</small>"]:::interface
+        in_guard{{"Input guard<br/><small>PII redaction, injection screen</small>"}}:::guardrail
+    end
+    subgraph L2["Orchestration (Code decides, model proposes)"]
+        classifier(["Intent classifier<br/><small>typed route (enum)</small>"]):::agent
+        triage["Triage workflow graph<br/><small>checkpointed, step budget</small>"]:::orchestrator
+        drafter(["Reply drafter<br/><small>cites policy IDs or abstains</small>"]):::agent
+        retriever["Policy retriever<br/><small>hybrid search, metadata filters</small>"]:::orchestrator
+    end
+    subgraph L3["Policy and human approval (Deny by default)"]
+        gate{{"Refund policy gate<br/><small>eligibility, amount limit, owner</small>"}}:::guardrail
+        approval(["Human approval<br/><small>approve exact refund or escalate</small>"]):::human
+        out_guard{{"Output guard<br/><small>citations, PII, tone</small>"}}:::guardrail
+    end
+    subgraph L4["Tools via MCP (Narrow, scoped, allowlisted)"]
+        orders["Orders MCP<br/><small>read-only scope</small>"]:::tool
+        refund["Refund MCP<br/><small>write, idempotency key</small>"]:::tool
+        helpdesk["Helpdesk MCP<br/><small>send reply, update ticket</small>"]:::tool
+    end
+    subgraph L5["Data, state and knowledge (Owner-scoped)"]
+        checkpoints[("Checkpoint store<br/><small>thread_id, durable interrupts</small>")]:::data
+        ledger[("Refund ledger<br/><small>unique key, receipts</small>")]:::data
+        kb[("Policy knowledge base<br/><small>chunks with source ID + version</small>")]:::data
+    end
+    subgraph L6["Observability and evals (Every component emits spans)"]
+        trace["Trajectory tracing<br/><small>OpenTelemetry, redacted</small>"]:::observability
+        audit["Audit log<br/><small>approvals, denials, expiries</small>"]:::observability
+        evals["Eval harness and release gate<br/><small>golden set, red-team ledger</small>"]:::observability
+    end
+    customer -->|message| api
+    api -->|typed request| in_guard
+    in_guard -->|screened case| triage
+    triage ==>|classify| classifier
+    classifier ==>|order lookup (read)| orders
+    triage ==>|draft reply| drafter
+    drafter ==>|policy query| retriever
+    retriever -.->|passages = data| kb
+    triage ==>|refund proposal| gate
+    gate ==>|save, then interrupt| checkpoints
+    gate -.->|within policy| approval
+    approval -.->|approved exact action| refund
+    refund -->|idempotent write| ledger
+    drafter -->|cited draft| out_guard
+    out_guard -->|send reply| helpdesk
+    ledger -.->|receipts| audit
+    checkpoints -.->|state transitions| trace
